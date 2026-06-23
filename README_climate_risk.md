@@ -82,7 +82,7 @@ The main toggles are:
 or:
 
 `RUN_RISK = True`
-`SA_PV_RISK_MODE = "ground"` # or `"roof"`
+`SA_PV_RISK_MODE = "ground"` or `"roof"`
 
 Outputs are saved using distinct filenames, for example:
 
