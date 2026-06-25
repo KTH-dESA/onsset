@@ -3,6 +3,7 @@
 server/
 test_output/
 quickrun.py
+Test-ouputs/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

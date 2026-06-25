@@ -109,6 +109,27 @@ SET_BACKUP_CAP = "BackupCap"
 SET_BACKUP_LCOE = "BackUpLCOE"
 SET_AVERAGE_TO_PEAK = "AverageToPeakLoadRatio"
 
+### NEW (2) add constants that refer to the penalty factor columns
+
+SET_RF_MG_WIND_GENERATION = 'rf_total_MG_WIND_GENERATION'
+SET_RF_MG_PV_GENERATION = 'rf_total_MG_PV_GENERATION'
+SET_RF_SA_PV = 'rf_total_SA_PV'
+SET_RF_GRID_POLE = 'rf_total_GRID_POLE'
+SET_RF_GRID_TRANSFORMER = 'rf_total_GRID_TRANSFORMER'
+SET_RF_MG_PV = 'rf_total_MG_PV'             ### technology-level mini-grid penalty
+SET_RF_MG_WIND = 'rf_total_MG_WIND'         ### technology-level mini-grid penalty
+
+RISK_ANNUITY_YEARS = 30                     ### Risk-factor annualisation assumptions e.g. 30 years at 6%
+RISK_ANNUITY_DISCOUNT_RATE = 0.06
+
+def risk_annuity_factor(
+    discount_rate=RISK_ANNUITY_DISCOUNT_RATE,
+    years=RISK_ANNUITY_YEARS
+):
+    if discount_rate == 0:
+        return years
+    return (1 - (1 + discount_rate) ** (-years)) / discount_rate            ### END NEW
+
 # General
 LHV_DIESEL = 9.9445485  # (kWh/l) lower heating value
 HOURS_PER_YEAR = 8760
@@ -217,9 +238,12 @@ class Technology:
     def get_lcoe(self, energy_per_cell, people, num_people_per_hh, start_year, end_year, new_connections,
                  total_energy_per_cell, prev_code, grid_cell_area, base_to_peak_load_ratio, sa_diesel_calc={}, unmet_demand=0, additional_mv_line_length=0.0,
                  capacity_factor=0.9, grid_penalty_ratio=1, fuel_cost=0, elec_loop=0,
-                 productive_nodes=0,  additional_transformer=0, penalty=1, get_max_dist=False, fuel_cost_settlement=0,
+                 productive_nodes=0,  additional_transformer=0, penalty=1,
+                 line_penalty=0, transformer_penalty=0, generation_penalty=0, ### NEW (3)
+                 get_max_dist=False, fuel_cost_settlement=0,
                  grid_reliability_option='None'):
-        """Calculates the LCOE depending on the parameters.
+        """      
+                 Calculates the LCOE depending on the parameters.
 
         Parameters
         ----------
@@ -274,7 +298,7 @@ class Technology:
 
         grid_penalty_ratio = 1
 
-        generation_per_year, peak_load, td_investment_cost, hv, mv, lv, service_transf, connection = \
+        generation_per_year, peak_load, td_investment_cost, td_risk_cost, hv, mv, lv, service_transf, connection = \
             self.td_network_cost(people,
                                  new_connections,
                                  prev_code,
@@ -287,12 +311,15 @@ class Technology:
                                  additional_transformer,
                                  productive_nodes,
                                  elec_loop,
-                                 penalty
+                                 penalty,
+                                 line_penalty,  ### NEW (4) get_lcoe() sends new line and transformer penalty values into td_network_cost()
+                                 transformer_penalty    ### NEW
                                  )
 
         generation_per_year = pd.Series(generation_per_year)
         peak_load = pd.Series(peak_load)
         td_investment_cost = pd.Series(td_investment_cost)
+        td_risk_cost = pd.Series(td_risk_cost)
 
         td_investment_cost = td_investment_cost # * grid_penalty_ratio
         td_om_cost = td_investment_cost * self.om_of_td_lines * penalty
@@ -308,15 +335,36 @@ class Technology:
             else:
                 cap_cost.loc[(installed_capacity < key) & (cap_cost == 0)] = self.capital_cost[key]
 
-        capital_investment = installed_capacity * cap_cost  # * penalty
-        total_om_cost = td_om_cost + (cap_cost * penalty * self.om_costs * installed_capacity)
+        capital_investment = installed_capacity * cap_cost    ### (7) NEW applies the penalty to CAPEX before the discounted-cost and LCOE calculation
+        grid_generation_investment = peak_load * self.grid_capacity_investment                   ### NEW
         total_investment_cost = td_investment_cost + capital_investment
+
+        """capital_investment = installed_capacity * cap_cost  # * penalty
+        total_om_cost = td_om_cost + (cap_cost * penalty * self.om_costs * installed_capacity)"""
 
         if self.grid_price > 0:
             fuel_cost = self.grid_price
 
         # Perform the time-value LCOE calculation
         project_life = end_year - start_year + 1
+
+        risk_ann_factor = risk_annuity_factor()                      ### NEW Convert risk-factor CAPEX equivalent into annual cost       )
+
+        generation_risk_cost = (
+            (capital_investment + grid_generation_investment) * generation_penalty
+        )
+
+        annual_risk_cost = (
+            td_risk_cost + generation_risk_cost
+        ) / risk_ann_factor
+
+        # Add annualised risk cost to annual costs
+        total_om_cost = (
+            td_om_cost +
+            (capital_investment * self.om_costs) +
+            annual_risk_cost
+        )                                                              ### END NEW
+
         reinvest_year = 0
         step = 0
         # If the technology life is less than the project life, we will have to invest twice to buy it again
@@ -340,7 +388,11 @@ class Technology:
         # Calculate the year of re-investment if tech_life is smaller than project life
         if reinvest_year:
             grid_capacity_investments[reinvest_year] = 1
-        grid_capacity_investments = np.outer(peak_load * self.grid_capacity_investment, grid_capacity_investments)
+        grid_capacity_investments = np.outer(                                       
+            grid_generation_investment,           ### NEW (8) applies the penalty to CAPEX before the discounted-cost and LCOE calculation
+            grid_capacity_investments                                                  
+        )
+        """peak_load * self.grid_capacity_investment"""
 
         # Calculate salvage value if tech_life is bigger than project life
         salvage = np.zeros(project_life)
@@ -582,7 +634,8 @@ class Technology:
 
     def td_network_cost(self, people, new_connections, prev_code, total_energy_per_cell, energy_per_cell,
                         num_people_per_hh, grid_cell_area, base_to_peak_load_ratio, additional_mv_line_length=0,
-                        additional_transformer=0, productive_nodes=0, elec_loop=0, penalty=1):
+                        additional_transformer=0, productive_nodes=0, elec_loop=0, penalty=1,
+                        line_penalty=0, transformer_penalty=0):                                                     ### NEW (5)
         """Calculates all the transmission and distribution network components
 
         Parameters
@@ -716,15 +769,42 @@ class Technology:
         else:
             power_house = 0
 
+        line_cost = (                                                   ### NEW (6) separate the existing td_investment_cost into existing components: line costs, transformer/substation costs, household connection costs, and mini-grid powerhouse cost
+            hv_lines_total_length * self.hv_line_cost +             
+            mv_lines_connection_length * self.mv_line_cost +
+            total_lv_lines_length * self.lv_line_cost +
+            mv_lines_distribution_length * self.mv_line_cost
+        )
+
+        transformer_cost = (
+            num_transformers * self.service_transf_cost +
+            no_of_hv_mv_substation * self.hv_mv_sub_station_cost
+        )
+
+        connection_cost = total_nodes * self.connection_cost_per_hh
+
+        td_investment_cost = (                                          # Base T&D CAPEX, without risk added upfront
+            line_cost +
+            transformer_cost +
+            connection_cost +
+            power_house
+        )
+
+        td_risk_cost = (                                                ### Risk cost is stored separately and annualised later in get_lcoe()
+            line_cost * line_penalty +
+            transformer_cost * transformer_penalty
+        )                                                               ### END NEW
+
+        """
         td_investment_cost = (hv_lines_total_length * self.hv_line_cost +
                               mv_lines_connection_length * self.mv_line_cost +
                               total_lv_lines_length * self.lv_line_cost +
                               mv_lines_distribution_length * self.mv_line_cost +
                               num_transformers * self.service_transf_cost +
                               total_nodes * self.connection_cost_per_hh +
-                              no_of_hv_mv_substation * self.hv_mv_sub_station_cost) + power_house
+                              no_of_hv_mv_substation * self.hv_mv_sub_station_cost) + power_house"""
 
-        return generation_per_year, peak_load, td_investment_cost, hv_lines_total_length * self.hv_line_cost, \
+        return generation_per_year, peak_load, td_investment_cost, td_risk_cost, hv_lines_total_length * self.hv_line_cost, \
             mv_lines_distribution_length * self.mv_line_cost, total_lv_lines_length * self.lv_line_cost,\
             num_transformers * self.service_transf_cost, total_nodes * self.connection_cost_per_hh
 
@@ -1821,8 +1901,10 @@ class SettlementProcessor:
                                unmet_demand=self.df[SET_UNMET_DEMAND + "{}".format(year)],
                                fuel_cost_settlement=self.df[SET_MG_DIESEL_FUEL + "{}".format(year)],
                                sa_diesel_calc=sa_diesel_calc,
-                               grid_reliability_option=grid_reliability_option,
-                               base_to_peak_load_ratio=self.df[SET_AVERAGE_TO_PEAK]
+                               grid_reliability_option=grid_reliability_option,                         
+                               base_to_peak_load_ratio=self.df[SET_AVERAGE_TO_PEAK],                    
+                               line_penalty=self.df.get(SET_RF_GRID_POLE, 0),                           ### NEW pass the grid penalties in get_lcoe
+                               transformer_penalty=self.df.get(SET_RF_GRID_TRANSFORMER, 0)              ### NEW
                                )
 
         if get_max_dist:
@@ -2550,6 +2632,25 @@ class SettlementProcessor:
                                        capacity_factor=self.df[SET_GHI] / HOURS_PER_YEAR,
                                        base_to_peak_load_ratio=self.df[SET_AVERAGE_TO_PEAK]
                                        )
+        mg_pv_penalty = self.df.get(SET_RF_MG_PV, 0)                                                                ### NEW apply total mini-grid PV risk penalty
+
+        mg_pv_project_life = end_year - (year - time_step) + 1                                                      ### Use same project lifetime as the hybrid LCOE calculation
+
+        mg_pv_risk_ann_factor = risk_annuity_factor()
+
+        annual_energy = self.df[SET_ENERGY_PER_CELL + "{}".format(year)].replace(0, np.nan)                        # Annual electricity demand used to convert annual risk cost into LCOE
+
+        # Present-value risk cost based on the mini-grid PV investment
+        mg_pv_risk_cost = mg_pv_hybrid_investment.iloc[:, 0] * mg_pv_penalty
+
+        # Convert to annual cost
+        mg_pv_annual_risk_cost = mg_pv_risk_cost / mg_pv_risk_ann_factor
+
+        # Add annualised risk cost to LCOE
+        self.df[SET_LCOE_MG_PV_HYBRID + "{}".format(year)] = (
+            self.df[SET_LCOE_MG_PV_HYBRID + "{}".format(year)] +
+            (mg_pv_annual_risk_cost / annual_energy).fillna(0)
+        )                                                                                                            ### END NEW apply total mini-grid PV risk penalty
 
         self.df.loc[self.df[SET_LCOE_MG_PV_HYBRID + "{}".format(year)] > 99, SET_LCOE_MG_PV_HYBRID + "{}".format(year)] = 99
 
@@ -2571,6 +2672,28 @@ class SettlementProcessor:
                                          grid_cell_area=self.df[SET_GRID_CELL_AREA],
                                          capacity_factor=self.df[SET_WINDCF],
                                          base_to_peak_load_ratio=self.df[SET_AVERAGE_TO_PEAK])
+        
+        mg_wind_penalty = self.df.get(SET_RF_MG_WIND, 0)                                                              ### NEW apply total mini-grid wind risk penalty
+
+        mg_wind_project_life = end_year - (year - time_step) + 1                                                      ### Use the same project lifetime as the hybrid LCOE calculation
+
+        mg_wind_risk_ann_factor = risk_annuity_factor()
+
+        # Annual electricity demand used to convert annual risk cost into LCOE
+        annual_energy = self.df[SET_ENERGY_PER_CELL + "{}".format(year)].replace(0, np.nan)
+
+        # Present-value risk cost based on the mini-grid wind investment
+        mg_wind_risk_cost = mg_wind_investment.iloc[:, 0] * mg_wind_penalty
+
+        # Convert to annual cost
+        mg_wind_annual_risk_cost = mg_wind_risk_cost / mg_wind_risk_ann_factor
+
+        # Add annualised risk cost to LCOE
+        self.df[SET_LCOE_MG_WIND + "{}".format(year)] = (
+            self.df[SET_LCOE_MG_WIND + "{}".format(year)] +
+            (mg_wind_annual_risk_cost / annual_energy).fillna(0)
+        )                                                                                                              ### END NEW apply total mini-grid wind risk penalty
+
         self.df.loc[self.df[SET_LCOE_MG_WIND + "{}".format(year)] > 99, SET_LCOE_MG_WIND + "{}".format(year)] = 99
 
         self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH]) < min_mg_size, SET_LCOE_MG_WIND + "{}".format(year)] = 99
@@ -2588,7 +2711,8 @@ class SettlementProcessor:
                                 num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                 grid_cell_area=self.df[SET_GRID_CELL_AREA],
                                 capacity_factor=self.df[SET_GHI] / HOURS_PER_YEAR,
-                                base_to_peak_load_ratio=sa_pv_calc.base_to_peak_load_ratio)
+                                base_to_peak_load_ratio=sa_pv_calc.base_to_peak_load_ratio,
+                                generation_penalty=self.df.get(SET_RF_SA_PV, 0))                        ### NEW (10) pass SA_PV generation penalty in off-grid lcoe calculation
 
         self.df.loc[(self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] != 3) &
                     (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] != 99),
