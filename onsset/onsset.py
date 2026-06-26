@@ -1387,6 +1387,9 @@ class SettlementProcessor:
         self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(start_year)] == 99, SET_ELEC_POP_CALIB] = 0
         self.df[SET_ELEC_POP + "{}".format(start_year)] = self.df[SET_ELEC_POP_CALIB]
 
+        self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(start_year)] == 1, SET_ELEC_YEAR] = start_year # set electrification year for settlements that are electrified in the start year
+        self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(start_year)] == 99, SET_ELEC_YEAR] = 9999 # set electrification year for settlements that are not electrified in the start year
+
         return elec_modelled, rural_elec_modelled, urban_elec_modelled, dist_limit, \
             min_night_lights, min_pop, buffer, td_dist_2
 
@@ -1405,6 +1408,8 @@ class SettlementProcessor:
             (self.df[SET_ELEC_FINAL_CODE + '{}'.format(start_year)] != 1) & (self.df[SET_NIGHT_LIGHTS] > mg_ntl) &
             (self.df[SET_MG_DIST] < mg_dist) & (self.df[SET_POP_CALIB] > min_pop), SET_ELEC_FINAL_CODE + '{}'.format(
                 start_year)] = 5
+        
+        self.df.loc[self.df.loc[SET_ELEC_FINAL_CODE + '{}'.format(start_year)] == 5, SET_ELEC_YEAR] = start_year # set electrification year for settlements that are mini-grid electrified in the start year
 
         self.df.loc[
             (self.df[SET_ELEC_FINAL_CODE + '{}'.format(start_year)] != 1) & (self.df[SET_NIGHT_LIGHTS] > mg_ntl) &
@@ -2929,6 +2934,14 @@ class SettlementProcessor:
         self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 5, 'Technology{}'.format(year)] = 'PV Hybrid Mini-Grid'
         self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 6, 'Technology{}'.format(year)] = 'Wind Hybrid Mini-Grid'
         self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 7, 'Technology{}'.format(year)] = 'Hydro Mini-Grid'
+
+        if SET_ELEC_FINAL_CODE + "{}".format(year - time_step) in self.df.columns: # later years of analysis, when the previous year is not the start year, we need to check if the settlement was electrified in the previous year
+            self.df.loc[(self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] < 99) & (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] == 99),
+                SET_ELEC_YEAR] = year
+            
+        else: # first year of analysis, we need to check if the settlement was electrified in the start year
+            self.df.loc[(self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] < 99) & (self.df[SET_ELEC_YEAR] == 9999),
+            SET_ELEC_YEAR] = year 
 
         print("The electrification rate achieved in {} is {:.1f} %".format(year, elecrate * 100))
 
