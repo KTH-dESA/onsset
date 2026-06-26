@@ -849,6 +849,12 @@ class SettlementProcessor:
         self.df['ElectrificationOrder'] = 0
         self.df['PerHouseholdDemand'] = 0
 
+        for c in self.df.columns:
+            if c.startswith('ResidentialDemandTierCustom'):
+                if self.df[c].isnull().values.any():
+                    self.df[c] = self.df[c].fillna(self.df[c].mode()[0])
+                    print(c + " contains null values. Filling with most common")
+
         for c in columns:
             if c in self.df.columns:
                 if self.df[c].isnull().values.any():
@@ -856,21 +862,21 @@ class SettlementProcessor:
                              'ResidentialDemandTierCustomRural', 'ResidentialDemandTier1',
                              'ResidentialDemandTier2',
                              'ResidentialDemandTier3', 'ResidentialDemandTier4', 'ResidentialDemandTier5']:
-                        self.df[c].fillna(self.df[c].mode()[0], inplace=True)
+                        self.df[c] = self.df[c].fillna(self.df[c].mode()[0])
                         print(c + " contains null values. Filling with most common")
 
                     elif c in ['GHI', 'TravelTime', 'WindVel', 'TravelHours']:
-                        self.df[c].fillna(self.df[c].mean(), inplace=True)
+                        self.df[c] = self.df[c].fillna(self.df[c].mean())
                         print(c + " contains null values. Filling with mean")
 
                     elif c in ['NightLights', 'ElecPop', 'IsUrban', 'Elevation', 'Slope', 'Hydropower', 'HealthDemand',
                                'EducationDemand', 'AgriDemand', 'CommercialDemand', 'Conflict', 'ElectrificationOrder',
                                'RoadDist']:
-                        self.df[c].fillna(0, inplace=True)
+                        self.df[c] = self.df[c].fillna(0)
                         print(c + " contains null values. Filling with 0")
 
                     elif c in ['HydropowerDist', 'HydropowerFID']:
-                        self.df[c].fillna(9999, inplace=True)
+                        self.df[c] = self.df[c].fillna(9999)
                         print(c + " contains null values. Filling with 9999")
 
                     elif c in ['GridCellArea', 'Pop', 'id', 'Admin_1', 'PlannedHVLineDist', 'SubstationDist',
