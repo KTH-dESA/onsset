@@ -1822,7 +1822,7 @@ class SettlementProcessor:
                                end_year=end_year,
                                people=self.df[SET_POP + "{}".format(year)],
                                new_connections=self.df[SET_NEW_CONNECTIONS + "{}".format(year)],
-                               total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL],
+                               total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)],
                                prev_code=self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)],
                                num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                grid_cell_area=self.df[SET_GRID_CELL_AREA],
@@ -1982,7 +1982,7 @@ class SettlementProcessor:
         # Some conditioning to eliminate negative values if existing by mistake
         self.df.loc[self.df[SET_NEW_CONNECTIONS + "{}".format(year)] < 0, SET_NEW_CONNECTIONS + "{}".format(year)] = 0
 
-    def set_residential_demand(self, urban_tier, rural_tier_large, rural_tier_small, rural_cutoff, tiers, year):
+    def set_residential_demand(self, urban_tier, rural_tier_large, rural_tier_small, rural_cutoff, tiers, year, all_years):
         """this method defines residential demand per tier level for each target year
 
         Arguments
@@ -1997,33 +1997,95 @@ class SettlementProcessor:
 
         if max(self.df[SET_HH_DEMAND]) == 0:
 
-            self.df[SET_HH_DEMAND] = 0.
+            self.df[SET_HH_DEMAND + "{}".format(year)] = 0.
+            self.df[SET_HH_DEMAND_ADD + "{}".format(year)] = 0.
 
             # Define residential demand
             if int(urban_tier) == 6:
-                self.df.loc[self.df[SET_URBAN] > 0, SET_HH_DEMAND] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH]
+                self.df.loc[self.df[SET_URBAN] > 0, SET_HH_DEMAND + "{}".format(year)] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH]
+            
+            elif int(urban_tier) == 7: # urban demand growth based on first year of electrification
+                self.df.loc[self.df[SET_URBAN] > 0, SET_HH_DEMAND + "{}".format(year)] = \
+                self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_NUM_PEOPLE_PER_HH] # household demand for newly electrified populations within a settlement always correspond to base year demand level
+
+                for elec_year in all_years[:all_years.index(year)]: # looping over all years of electrification prior to the current year to calculate additional demand growth for previously electrified populations within a settlement
+
+                    if elec_year == all_years[0]: # calculating incremental demand growth for populations that had access to electricity in the base year
+                        self.df.loc[(self.df[SET_URBAN] > 0) & (self.df[SET_ELEC_YEAR] < 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                    - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                                   / self.df[SET_NUM_PEOPLE_PER_HH] * self.df[SET_ELEC_POP + "{}".format(elec_year)], 0)
+
+                    else: # calculating incremental demand growth for populations that gained access in later years   
+                        self.df.loc[(self.df[SET_URBAN] > 0) & (self.df[SET_ELEC_YEAR] < 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                    - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                                   * self.df[SET_NEW_CONNECTIONS + "{}".format(elec_year)], 0)
+            
             else:
-                self.df.loc[self.df[SET_URBAN] > 0, SET_HH_DEMAND] = tiers[urban_tier]
+                self.df.loc[self.df[SET_URBAN] > 0, SET_HH_DEMAND + "{}".format(year)] = tiers[urban_tier]
 
             if int(rural_tier_large) == 6:
                 self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] >= rural_cutoff) & (self.df[SET_URBAN] == 0),
-                            SET_HH_DEMAND] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH]
+                            SET_HH_DEMAND + "{}".format(year)] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH] 
+            
+            elif int(rural_tier_large) == 7: # rural demand growth based on first year of electrification
+                self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] >= rural_cutoff) & (self.df[SET_URBAN] == 0),
+                            SET_HH_DEMAND + "{}".format(year)] = self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_NUM_PEOPLE_PER_HH] # household demand for newly electrified populations within a settlement always correspond to base year demand level
+                
+                for elec_year in all_years[:all_years.index(year)]: # looping over all years of electrification prior to the current year to calculate additional demand growth for previously electrified populations within a settlement
+                    
+                    if elec_year == all_years[0]: # calculating incremental demand growth for populations that had access to electricity in the base year
+                        self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] >= rural_cutoff) & (self.df[SET_URBAN] == 0) & \
+                        (self.df[SET_ELEC_YEAR] < 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                               / self.df[SET_NUM_PEOPLE_PER_HH] * self.df[SET_ELEC_POP + "{}".format(elec_year)], 0)
+
+                    else: # calculating incremental demand growth for populations that gained access in later years
+                        self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] >= rural_cutoff) & (self.df[SET_URBAN] == 0) & \
+                            (self.df[SET_ELEC_YEAR] < 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                    - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                                   * self.df[SET_NEW_CONNECTIONS + "{}".format(elec_year)], 0) 
+            
             else:
                 self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] >= rural_cutoff) & (self.df[SET_URBAN] == 0),
-                            SET_HH_DEMAND] = tiers[rural_tier_large]
+                            SET_HH_DEMAND + "{}".format(year)] = tiers[rural_tier_large]
 
             if int(rural_tier_small) == 6:
                 self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] < rural_cutoff) & (self.df[SET_URBAN] == 0),
-                            SET_HH_DEMAND] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH]
+                            SET_HH_DEMAND + "{}".format(year)] = self.df[SET_RESIDENTIAL_TIER + 'Custom'] * self.df[SET_NUM_PEOPLE_PER_HH]
+            
+            elif int(rural_tier_small) == 7: # rural demand growth based on first year of electrification
+                self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] < rural_cutoff) & (self.df[SET_URBAN] == 0),
+                            SET_HH_DEMAND + "{}".format(year)] = self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_NUM_PEOPLE_PER_HH] # household demand for newly electrified populations within a settlement always correspond to base year demand level
+                
+                for elec_year in all_years[:all_years.index(year)]: # looping over all years of electrification prior to the current year to calculate additional demand growth for previously electrified populations within a settlement
+                    
+                    if elec_year == all_years[0]: # calculating incremental demand growth for populations that had access to electricity in the base year
+                        self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] < rural_cutoff) & (self.df[SET_URBAN] == 0) & \
+                        (self.df[SET_ELEC_YEAR] > 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                               / self.df[SET_NUM_PEOPLE_PER_HH] * self.df[SET_ELEC_POP + "{}".format(elec_year)], 0)
+
+                    else: # calculating incremental demand growth for populations that gained access in later years
+                        self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] < rural_cutoff) & (self.df[SET_URBAN] == 0) & \
+                            (self.df[SET_ELEC_YEAR] > 9999), SET_HH_DEMAND_ADD + "{}".format(year)] += \
+                        np.maximum((self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year)])] \
+                                    - self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[all_years.index(year) - all_years.index(elec_year) - 1])]) \
+                                   * self.df[SET_NEW_CONNECTIONS + "{}".format(elec_year)], 0)
+            
             else:
                 self.df.loc[(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH] < rural_cutoff) & (self.df[SET_URBAN] == 0),
-                            SET_HH_DEMAND] = tiers[rural_tier_small]
+                            SET_HH_DEMAND + "{}".format(year)] = tiers[rural_tier_small]
 
         self.df[SET_TIER] = 5
-        self.df.loc[self.df[SET_HH_DEMAND] < tiers[5], SET_TIER] = 4
-        self.df.loc[self.df[SET_HH_DEMAND] < tiers[4], SET_TIER] = 3
-        self.df.loc[self.df[SET_HH_DEMAND] < tiers[3], SET_TIER] = 2
-        self.df.loc[self.df[SET_HH_DEMAND] < tiers[2], SET_TIER] = 1
+        self.df.loc[self.df[SET_HH_DEMAND + "{}".format(year)] < tiers[5], SET_TIER] = 4
+        self.df.loc[self.df[SET_HH_DEMAND + "{}".format(year)] < tiers[4], SET_TIER] = 3
+        self.df.loc[self.df[SET_HH_DEMAND + "{}".format(year)] < tiers[3], SET_TIER] = 2
+        self.df.loc[self.df[SET_HH_DEMAND + "{}".format(year)] < tiers[2], SET_TIER] = 1
 
         self.df[SET_AVERAGE_TO_PEAK] = 0.8
         self.df.loc[self.df[SET_TIER] == 1, SET_AVERAGE_TO_PEAK] = 0.3
@@ -2032,7 +2094,7 @@ class SettlementProcessor:
         self.df.loc[self.df[SET_TIER] == 4, SET_AVERAGE_TO_PEAK] = 0.5
         self.df.loc[self.df[SET_TIER] == 5, SET_AVERAGE_TO_PEAK] = 0.5
 
-    def calculate_total_demand_per_settlement(self, year, time_step):
+    def calculate_total_demand_per_settlement(self, year, time_step, all_years):
         """this method calculates total demand for each settlement per year
 
         Arguments
@@ -2043,34 +2105,46 @@ class SettlementProcessor:
 
         produse = self.df[SET_AGRI_DEMAND] + self.df[SET_COMMERCIAL_DEMAND] + self.df[SET_HEALTH_DEMAND] + self.df[
             SET_EDU_DEMAND]
-
+        
+        # adding additional demand of previously electrified populations to the annual unmet demand per cluster
         self.df.loc[self.df[SET_URBAN] == 0, SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)]
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
         self.df.loc[self.df[SET_URBAN] == 1, SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)]
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
         self.df.loc[self.df[SET_URBAN] == 2, SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)]
-
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
+        # additional demand does not apply to newly electrified clusters
         self.df.loc[(self.df[SET_URBAN] == 0) & (self.df[SET_ELEC_FINAL_CODE + "{}".format(
             year - time_step)] == 99), SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + produse
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
         self.df.loc[(self.df[SET_URBAN] == 1) & (self.df[SET_ELEC_FINAL_CODE + "{}".format(
             year - time_step)] == 99), SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + produse
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
         self.df.loc[(self.df[SET_URBAN] == 2) & (self.df[SET_ELEC_FINAL_CODE + "{}".format(
             year - time_step)] == 99), SET_ENERGY_PER_CELL + "{}".format(year)] = \
-            self.df[SET_HH_DEMAND] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + produse
+            self.df[SET_HH_DEMAND + "{}".format(year)] * self.df[SET_NEW_CONNECTIONS + "{}".format(year)] + self.df[SET_HH_DEMAND_ADD + "{}".format(year)]
 
-        self.df.loc[self.df[SET_URBAN] == 0, SET_TOTAL_ENERGY_PER_CELL] = \
-            self.df[SET_HH_DEMAND] * np.round(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH]) + produse
-        self.df.loc[self.df[SET_URBAN] == 1, SET_TOTAL_ENERGY_PER_CELL] = \
-            self.df[SET_HH_DEMAND] * np.round(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH]) + produse
-        self.df.loc[self.df[SET_URBAN] == 2, SET_TOTAL_ENERGY_PER_CELL] = \
-            self.df[SET_HH_DEMAND] * np.round(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH]) + produse
+        if year == all_years[1]: # total demand per settlement for the first year of analysis: the base year demand of previously electrified populations + the demand of newly electrified populations
+            self.df.loc[self.df[SET_URBAN] == 0, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_ELEC_POP + str(all_years[0])] \
+            + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
+            self.df.loc[self.df[SET_URBAN] == 1, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_ELEC_POP + str(all_years[0])] \
+            + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
+            self.df.loc[self.df[SET_URBAN] == 2, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_RESIDENTIAL_TIER + 'Custom' + str(all_years[0])] * self.df[SET_ELEC_POP + str(all_years[0])] \
+            + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
+        else: # total demand per settlement for later years of analysis: total demand from previous year + the demand of newly electrified populations
+            self.df.loc[self.df[SET_URBAN] == 0, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year - time_step)] + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
+            self.df.loc[self.df[SET_URBAN] == 1, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year - time_step)] + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
+            self.df.loc[self.df[SET_URBAN] == 2, SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)] = \
+            self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year - time_step)] + self.df[SET_ENERGY_PER_CELL + "{}".format(year)]
 
     def calculate_demand(self, year, num_people_per_hh_rural, num_people_per_hh_urban,
                          time_step, urban_tier, rural_tier_large, rural_tier_small, rural_cutoff,
-                         tiers):
+                         tiers, all_years):
         """
         this method determines some basic parameters required in LCOE calculation
         it sets the basic scenario parameters that differ based on urban/rural so that they are in the table and
@@ -2092,8 +2166,8 @@ class SettlementProcessor:
 
         self.calculate_new_connections(year, time_step, num_people_per_hh_rural, num_people_per_hh_urban)
         self.set_residential_demand(urban_tier, rural_tier_large, rural_tier_small, rural_cutoff,
-                               tiers, year)
-        self.calculate_total_demand_per_settlement(year, time_step)
+                               tiers, year, all_years)
+        self.calculate_total_demand_per_settlement(year, time_step, all_years)
 
     def calculate_unmet_demand(self, year, reliability=1):
         if SET_GRID_RELIABILITY in self.df:
@@ -2537,7 +2611,7 @@ class SettlementProcessor:
                                    end_year=end_year,
                                    people=self.df[SET_POP + "{}".format(year)],
                                    new_connections=self.df[SET_NEW_CONNECTIONS + "{}".format(year)],
-                                   total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL],
+                                   total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)],
                                    prev_code=self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)],
                                    num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                    grid_cell_area=self.df[SET_GRID_CELL_AREA],
@@ -2556,7 +2630,7 @@ class SettlementProcessor:
                                        end_year=end_year,
                                        people=self.df[SET_POP + "{}".format(year)],
                                        new_connections=self.df[SET_NEW_CONNECTIONS + "{}".format(year)],
-                                       total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL],
+                                       total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)],
                                        prev_code=self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)],
                                        num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                        grid_cell_area=self.df[SET_GRID_CELL_AREA],
@@ -2578,7 +2652,7 @@ class SettlementProcessor:
                                          end_year=end_year,
                                          people=self.df[SET_POP + "{}".format(year)],
                                          new_connections=self.df[SET_NEW_CONNECTIONS + "{}".format(year)],
-                                         total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL],
+                                         total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)],
                                          prev_code=self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)],
                                          num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                          grid_cell_area=self.df[SET_GRID_CELL_AREA],
@@ -2596,7 +2670,7 @@ class SettlementProcessor:
                                 end_year=end_year,
                                 people=self.df[SET_POP + "{}".format(year)],
                                 new_connections=self.df[SET_NEW_CONNECTIONS + "{}".format(year)],
-                                total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL],
+                                total_energy_per_cell=self.df[SET_TOTAL_ENERGY_PER_CELL + "{}".format(year)],
                                 prev_code=self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)],
                                 num_people_per_hh=self.df[SET_NUM_PEOPLE_PER_HH],
                                 grid_cell_area=self.df[SET_GRID_CELL_AREA],
