@@ -98,6 +98,7 @@ SET_TIER = 'Tier'
 SET_INVEST_PER_CONNECTION = "InvestmentPerConnection"
 SET_CALIB_GRID_DIST = 'GridDistCalibElec'
 SET_HH_DEMAND = 'PerHouseholdDemand'
+SET_HH_DEMAND_ADD = 'AdditionalHouseholdDemand' ### additional demand per settlement [kWh] due to demand growth of previously electrified households
 SET_RESIDENTIAL_TIER = 'ResidentialDemandTier'
 SET_MIN_TD_DIST = 'minTDdist'
 SET_SA_DIESEL_FUEL = 'SADieselFuelCost'
@@ -108,6 +109,7 @@ SET_UNMET_DEMAND = 'UnmetDemand'  # To Calculate grid reliability
 SET_BACKUP_CAP = "BackupCap"
 SET_BACKUP_LCOE = "BackUpLCOE"
 SET_AVERAGE_TO_PEAK = "AverageToPeakLoadRatio"
+SET_ELEC_YEAR = "ElectrificationYear" # the first year at least one household per settlement is electrified
 
 # General
 LHV_DIESEL = 9.9445485  # (kWh/l) lower heating value
