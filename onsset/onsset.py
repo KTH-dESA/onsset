@@ -2241,7 +2241,7 @@ class SettlementProcessor:
                               end_year=end_year,
                               )
 
-        return result[0], result[3], result[8] + result[9], result[4]
+        return result[0], result[3], result[8] + result[9], result[11] # result[4] was the fuel cost, result[11] is the fuel usage.
 
     def pv_hybrids_lcoe(self, year, time_step, end_year, mg_pv_hybrid_specs, pv_folder_path=r'../test_data'):
         #logging.info('Starting hybrid gen lcoe')
@@ -2258,7 +2258,7 @@ class SettlementProcessor:
                                           (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] != 2)) |
                                           (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] == 5), 1, 0)
 
-        gen_lcoe, inv, cap, fuel_cost = zip(
+        gen_lcoe, inv, cap, fuel_litres = zip(
             *self.df.apply(lambda row: self.optimize_mini_grid(ghi_curve * ((ghi_curve.sum() / 1000) / row[SET_GHI]),
                                                                temp,
                                                                row[SET_ENERGY_PER_CELL + '{}'.format(year)],
@@ -2278,9 +2278,9 @@ class SettlementProcessor:
         hybrid_lcoe = pd.Series(gen_lcoe)
         hybrid_capacity = pd.Series(cap)
         hybrid_investment = pd.Series(inv)
-        fuel_cost = pd.Series(fuel_cost)
-        emission_factor = fuel_cost / self.df[
-            SET_MG_DIESEL_FUEL + '{}'.format(year)] * 256.9131097 * 9.9445485  # ToDo check emission factor
+        fuel_litres = pd.Series(fuel_litres)
+        emission_factor = fuel_litres * 256.9131097 * 9.9445485   # fuel_cost now holds litres per year; g CO2 per settlement
+        # ToDo check emission factor
         self.df['PVHybridEmissionFactor' + "{}".format(year)] = emission_factor
         self.df['PVHybridGenLCOE' + "{}".format(year)] += hybrid_lcoe
 
@@ -2309,12 +2309,12 @@ class SettlementProcessor:
         pv_hybrids_lcoe = {}
         pv_hybrid_investment = {}
         pv_hybrid_capacity = {}
-        pv_hybrid_fuel_cost = {}
+        pv_hybrid_fuel_litres = {}
 
         for t in tiers:
             for g in ghi_range:
                 for d in diesel_range:
-                    gen_lcoe, inv, cap, fuel_cost = \
+                    gen_lcoe, inv, cap, fuel_litres = \
                         self.optimize_mini_grid(ghi_curve * g * 1000 / ghi_curve.sum(), #((ghi_curve.sum() / 1000) / g),
                                                 temp,
                                                 10000,
@@ -2329,7 +2329,7 @@ class SettlementProcessor:
                     pv_hybrids_lcoe[t, g, d] = gen_lcoe
                     pv_hybrid_investment[t, g, d] = inv
                     pv_hybrid_capacity[t, g, d] = cap
-                    pv_hybrid_fuel_cost[t, g, d] = fuel_cost
+                    pv_hybrid_fuel_litres[t, g, d] = fuel_litres
 
         def local_hybrid(ghi, diesel, tier, energy):
             ghi = round(ghi, -2)
@@ -2338,9 +2338,9 @@ class SettlementProcessor:
             hybrid_lcoe = pv_hybrids_lcoe[tier, ghi, diesel]
             hybrid_investment = pv_hybrid_investment[tier, ghi, diesel] #* (energy / 10000)
             hybrid_capacity = pv_hybrid_capacity[tier, ghi, diesel] #* (energy / 10000)
-            hybrid_fuel_cost = pv_hybrid_fuel_cost[tier, ghi, diesel] #* (energy / 10000)
+            hybrid_fuel_litres = pv_hybrid_fuel_litres[tier, ghi, diesel] #* (energy / 10000)
 
-            return hybrid_lcoe, hybrid_investment, hybrid_capacity, hybrid_fuel_cost
+            return hybrid_lcoe, hybrid_investment, hybrid_capacity, hybrid_fuel_litres
 
         self.df['PotentialMG'] = np.where(
             ((self.df[SET_POP + "{}".format(year)] > mg_pv_hybrid_specs['min_mg_connections'])
@@ -2361,9 +2361,9 @@ class SettlementProcessor:
         hybrid_lcoe = pd.Series(hybrid_series[0])
         hybrid_capacity = pd.Series(hybrid_series[2] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
         hybrid_investment = pd.Series(hybrid_series[1] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
-        fuel_cost = pd.Series(hybrid_series[3] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
-        emission_factor = fuel_cost / self.df[
-            SET_MG_DIESEL_FUEL + '{}'.format(year)] * 256.9131097 * 9.9445485  # ToDo check emission factor
+        fuel_litres = pd.Series(hybrid_series[3] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
+        emission_factor = fuel_litres * 256.9131097 * 9.9445485   # fuel_cost now holds litres per year; g CO2 per settlement
+        # ToDo check emission factor
         self.df['PVHybridEmissionFactor' + "{}".format(year)] = emission_factor
         self.df['PVHybridGenLCOE' + "{}".format(year)] += hybrid_lcoe
 
@@ -2449,7 +2449,7 @@ class SettlementProcessor:
                                    end_year=end_year,
                                    )
 
-        return result[0], result[3], result[8] + result[9], result[4]
+        return result[0], result[3], result[8] + result[9], result[11]
 
     def wind_hybrids_lcoe(self, year, time_step, end_year, mg_wind_hybrid_specs, wind_folder_path=r'../test_data'):
         #logging.info('Starting hybrid gen lcoe')
@@ -2466,7 +2466,7 @@ class SettlementProcessor:
                                           (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] != 10)) |
                                           (self.df[SET_ELEC_FINAL_CODE + "{}".format(year - time_step)] == 5), 1, 0)
 
-        gen_lcoe, inv, cap, fuel_cost = zip(
+        gen_lcoe, inv, cap, fuel_litres = zip(
             *self.df.apply(lambda row: self.optimize_mini_grid_wind(wind_curve * row[SET_WINDVEL] / np.average(wind_curve),
                                                                     row[SET_ENERGY_PER_CELL + '{}'.format(year)],
                                                                     row[SET_TIER],
@@ -2485,10 +2485,10 @@ class SettlementProcessor:
         hybrid_lcoe = pd.Series(gen_lcoe)
         hybrid_capacity = pd.Series(cap)
         hybrid_investment = pd.Series(inv)
-        fuel_cost = pd.Series(fuel_cost)
-        emission_factor = fuel_cost / self.df[
-            SET_MG_DIESEL_FUEL + '{}'.format(year)] * 256.9131097 * 9.9445485  # ToDo check emission factor
-        self.df['windHybridEmissionFactor' + "{}".format(year)] = emission_factor
+        fuel_litres = pd.Series(fuel_litres)
+        emission_factor = fuel_litres * 256.9131097 * 9.9445485   # fuel_cost now holds litres per year; g CO2 per settlement
+        # ToDo check emission factor
+        self.df['WindHybridEmissionFactor' + "{}".format(year)] = emission_factor
         self.df['windHybridGenLCOE' + "{}".format(year)] += hybrid_lcoe
 
         return hybrid_lcoe, hybrid_capacity, hybrid_investment
@@ -2514,12 +2514,12 @@ class SettlementProcessor:
         wind_hybrids_lcoe = {}
         wind_hybrid_investment = {}
         wind_hybrid_capacity = {}
-        wind_hybrid_fuel_cost = {}
+        wind_hybrid_fuel_litres = {}
 
         for t in tiers:
             for g in wind_range:
                 for d in diesel_range:
-                    gen_lcoe, inv, cap, fuel_cost = \
+                    gen_lcoe, inv, cap, fuel_litres = \
                         self.optimize_wind_mini_grid(wind_curve * g / np.average(wind_curve),
                                                      10000,
                                                      t,
@@ -2533,7 +2533,7 @@ class SettlementProcessor:
                     wind_hybrids_lcoe[t, g, d] = gen_lcoe
                     wind_hybrid_investment[t, g, d] = inv
                     wind_hybrid_capacity[t, g, d] = cap
-                    wind_hybrid_fuel_cost[t, g, d] = fuel_cost
+                    wind_hybrid_fuel_litres[t, g, d] = fuel_litres
 
         def local_hybrid(wind, diesel, tier, energy):
             wind = round(wind)
@@ -2542,9 +2542,9 @@ class SettlementProcessor:
             hybrid_lcoe = wind_hybrids_lcoe[tier, wind, diesel]
             hybrid_investment = wind_hybrid_investment[tier, wind, diesel] #* (energy / 10000)
             hybrid_capacity = wind_hybrid_capacity[tier, wind, diesel] #* (energy / 10000)
-            hybrid_fuel_cost = wind_hybrid_fuel_cost[tier, wind, diesel] #* (energy / 10000)
+            hybrid_fuel_litres = wind_hybrid_fuel_litres[tier, wind, diesel] #* (energy / 10000)
 
-            return hybrid_lcoe, hybrid_investment, hybrid_capacity, hybrid_fuel_cost
+            return hybrid_lcoe, hybrid_investment, hybrid_capacity, hybrid_fuel_litres
 
         self.df['PotentialMG'] = np.where(
             ((self.df[SET_POP + "{}".format(year)] > mg_wind_hybrid_specs['min_mg_connections'])
@@ -2565,10 +2565,10 @@ class SettlementProcessor:
         hybrid_lcoe = pd.Series(hybrid_series[0])
         hybrid_capacity = pd.Series(hybrid_series[2] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
         hybrid_investment = pd.Series(hybrid_series[1] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
-        fuel_cost = pd.Series(hybrid_series[3] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
-        emission_factor = fuel_cost / self.df[
-            SET_MG_DIESEL_FUEL + '{}'.format(year)] * 256.9131097 * 9.9445485  # ToDo check emission factor
-        self.df['windHybridEmissionFactor' + "{}".format(year)] = emission_factor
+        fuel_litres = pd.Series(hybrid_series[3] * (self.df[SET_ENERGY_PER_CELL + "{}".format(year)] / 10000))
+        emission_factor = fuel_litres * 256.9131097 * 9.9445485   # fuel_cost now holds litres per year; g CO2 per settlement
+        # ToDo check emission factor
+        self.df['WindHybridEmissionFactor' + "{}".format(year)] = emission_factor
         self.df['windHybridGenLCOE' + "{}".format(year)] += hybrid_lcoe
 
         return hybrid_lcoe, hybrid_capacity, hybrid_investment, wind_hybrid_investment
@@ -3040,17 +3040,13 @@ class SettlementProcessor:
                     SET_ELEC_FINAL_CODE + '{}'.format(year)] = 2
 
     def calculate_emission(self, grid_factor, year, time_step, start_year):
-        self.df['AnnualEmissions' + "{}".format(year)] = 0.
-
-        self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] < 3, 'AnnualEmissions' + "{}".format(year)] = \
-            self.df[SET_ENERGY_PER_CELL + "{}".format(year)] * grid_factor / 1000
-        # self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 5, 'AnnualEmissions' + "{}".format(year)] = \
-        # self.df[SET_ENERGY_PER_CELL + "{}".format(year)] * self.df['PVHybridEmissionFactor' + "{}".format(year)] / 1000
-
-        self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 5, 'AnnualEmissions' + "{}".format(year)] = \
-            self.df['PVHybridEmissionFactor' + "{}".format(year)] / 1000
-        # self.df.loc[self.df[SET_ELEC_FINAL_CODE + "{}".format(year)] == 9, 'AnnualEmissions' + "{}".format(year)] = \
-        # self.df[SET_ENERGY_PER_CELL + "{}".format(year)] * self.df['WindHybridEmissionFactor' + "{}".format(year)] / 1000
+        yr = "{}".format(year)
+        em = 'AnnualEmissions' + yr
+        self.df[em] = 0.
+        code = self.df[SET_ELEC_FINAL_CODE + yr]
+        self.df.loc[code < 3, em] = self.df[SET_ENERGY_PER_CELL + yr] * grid_factor / 1000   # grid, kg
+        self.df.loc[code == 5, em] = self.df['PVHybridEmissionFactor' + yr] / 1000            # PV hybrid, kg
+        self.df.loc[code == 6, em] = self.df['WindHybridEmissionFactor' + yr] / 1000          # wind hybrid, kg
 
         if year - time_step != start_year:
             self.df['AnnualEmissionsTotal'] = self.df['AnnualEmissions' + "{}".format(year)] + self.df[
