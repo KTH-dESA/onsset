@@ -106,7 +106,8 @@ def calibration(specs_path, csv_path, specs_path_calib, calibrated_csv_path):
     onsseter.df.to_csv(settlements_out_csv, index=False)
 
 
-def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv_path, wind_path, mv_path):
+def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv_path, wind_path, mv_path,
+             cost_multipliers=None):
     """
 
     Arguments
@@ -115,8 +116,17 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
     calibrated_csv_path : str
     results_folder : str
     summary_folder : str
-
+    pv_path : str
+    wind_path : str
+    mv_path : str
+    cost_multipliers : dict, optional
+        A dictionary containing the cost multipliers for each type of cost.
     """
+    # Cost Trajectories (CT) --> cost_multipliers are read from config file or passed as argument. If not, they are set to 1 (no change in costs).
+    # This include grid (T&D including mini-grid T&D), renewable, diesel capex, diesel opex.
+
+    ctm = {'grid': 1.0, 'ren': 1.0, 'diesel_capex': 1.0, 'diesel_opex': 1.0}
+    ctm.update(cost_multipliers or {})
 
     scenario_info = pd.read_excel(specs_path, sheet_name='ScenarioInfo')
     scenarios = scenario_info['Scenario']
@@ -152,27 +162,32 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
         tier_index = scenario_info.iloc[scenario]['Target_electricity_consumption_level']
         grid_index = scenario_info.iloc[scenario]['Grid_electricity_generation_cost']
         productive_index = scenario_info.iloc[scenario]['Productive_uses_demand']
+        productive_demand = scenario_parameters.iloc[productive_index]['ProductiveDemand']
         prio_index = scenario_info.iloc[scenario]['Prioritization_algorithm']
 
         rural_tier_small = scenario_parameters.iloc[tier_index]['RuralTargetTierSmall']
         rural_tier_large = scenario_parameters.iloc[tier_index]['RuralTargetTierLarge']
         rural_cutoff = scenario_parameters.iloc[tier_index]['RuralCutoffSize']
         urban_tier = scenario_parameters.iloc[tier_index]['UrbanTargetTier']
-        grid_price = scenario_parameters.iloc[grid_index]['GridGenerationCost']
         prioritization = scenario_parameters.iloc[prio_index]['PrioritizationAlgorithm']
         auto_intensification = scenario_parameters.iloc[prio_index]['AutoIntensificationKM']
         max_auto_intensification_cost = scenario_parameters.iloc[prio_index]['MaxIntensificationCost']  # Max household connection cost for forced grid intensification
-        grid_capacity_investment = specs_data['GridCapacityInvestmentCost']
         annual_grid_cap_gen_limit = scenario_parameters.iloc[grid_index]['NewGridGenerationCapacityAnnualLimitMW'] * 1000
-        annual_new_grid_connections_limit = scenario_parameters.iloc[grid_index]['GridConnectionsLimitThousands'] * 1000
+        grid_connection_index = scenario_info.iloc[scenario]['Grid_connection_cap']
+        annual_new_grid_connections_limit = scenario_parameters.iloc[grid_connection_index]['GridConnectionsLimitThousands'] * 1000
 
-        carbon_cost = 0
-        grid_emission_factor = 0
+        sp = scenario_parameters
+        carbon_cost = float(sp['CarbonTax'][grid_index])
+        sfx = '' if int(grid_index) == 0 else '_CT'
+        grid_price               = float(sp['GridGenerationCost' + sfx][grid_index])
+        grid_emission_factor     = float(sp['GridEmissionFactor' + sfx][grid_index])
+        grid_capacity_investment = float(sp['GridCapacityInvestmentCost' + sfx][grid_index])
+        grid_re_share            = float(sp['GridRenShare' + sfx][grid_index])
 
-        settlements_out_csv = os.path.join(results_folder,
-                                           '{}-1-{}_{}_{}.csv'.format(country_id, tier_index, grid_index, prio_index))
-        summary_csv = os.path.join(summary_folder,
-                                   '{}-1-{}_{}_{}_summary.csv'.format(country_id, tier_index, grid_index, prio_index))
+        code = scenario_info.iloc[scenario]['Code'] if 'Code' in scenario_info.columns else '{}_{}_{}'.format(tier_index, grid_index, prio_index)
+        settlements_out_csv = os.path.join(results_folder, '{}-1-{}.csv'.format(country_id, code))
+        summary_csv = os.path.join(summary_folder, '{}-1-{}_summary.csv'.format(country_id, code))
+
 
         elements = ["1.Population", "2.New_Connections", "3.Capacity", "4.Investment", "5.AnnualEmissions"]
 
@@ -239,14 +254,14 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                           start_year=start_year,
                                           end_year=end_year,
                                           hv_line_type=69, # kV
-                                          hv_line_cost=53000, # USD/km
-                                          hv_mv_sub_station_cost=25000, # USD/unit
+                                          hv_line_cost=53000 * ctm['grid'], # USD/km
+                                          hv_mv_sub_station_cost=25000 * ctm['grid'], # USD/unit
                                           hv_mv_substation_type=10000, # kVA
                                           )
 
             grid_calc = Technology(om_of_td_lines=0.02,
                                    distribution_losses=float(specs_data.iloc[0][SPE_GRID_LOSSES]),
-                                   connection_cost_per_hh=125,
+                                   connection_cost_per_hh=125 * ctm['grid'],
                                    base_to_peak_load_ratio=0.8,
                                    capacity_factor=1,
                                    tech_life=30,
@@ -256,32 +271,32 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                    discount_rate=grid_discount_rate,
                                    mv_line_type=33,
                                    mv_line_amperage_limit=275,
-                                   mv_line_cost=25000,
+                                   mv_line_cost=25000 * ctm['grid'],
                                    lv_line_type=0.24,
-                                   lv_line_cost=15000,
+                                   lv_line_cost=15000 * ctm['grid'],
                                    lv_line_max_length=1,
                                    service_transf_type=75,
-                                   service_transf_cost=9000,
+                                   service_transf_cost=9000 * ctm['grid'],
                                    max_nodes_per_serv_trans=95,
                                    cnse=cnse)
 
             mg_hydro_calc = Technology(om_of_td_lines=0.02,
                                        distribution_losses=0.05,
-                                       connection_cost_per_hh=100,
+                                       connection_cost_per_hh=100 * ctm['grid'],
                                        base_to_peak_load_ratio=0.85,
                                        capacity_factor=0.5,
                                        tech_life=30,
-                                       capital_cost={float("inf"): 3000},
+                                       capital_cost={float("inf"): 3000 * ctm['ren']},
                                        om_costs=0.03,
                                        discount_rate=mg_discount_rate,
                                        mv_line_type=33,
                                        mv_line_amperage_limit=275,
-                                       mv_line_cost=25000,
+                                       mv_line_cost=25000 * ctm['grid'],
                                        lv_line_type=0.24,
-                                       lv_line_cost=15000,
+                                       lv_line_cost=15000 * ctm['grid'],
                                        lv_line_max_length=1,
                                        service_transf_type=75,
-                                       service_transf_cost=9000,
+                                       service_transf_cost=9000 * ctm['grid'],
                                        max_nodes_per_serv_trans=95,
                                        mini_grid=True,
                                        )
@@ -289,47 +304,47 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             sa_pv_calc = Technology(base_to_peak_load_ratio=0.9,
                                     tech_life=5,
                                     om_costs=0.02,
-                                    capital_cost={float("inf"): 6950,
-                                                  1: 4470,
-                                                  0.100: 6380,
-                                                  0.050: 8780,
-                                                  0.020: 9620,
+                                    capital_cost={float("inf"): 6950 * ctm['ren'],
+                                                  1: 4470 * ctm['ren'],
+                                                  0.100: 6380 * ctm['ren'],
+                                                  0.050: 8780 * ctm['ren'],
+                                                  0.020: 9620 * ctm['ren'],
                                                   },
                                     standalone=True,
                                     discount_rate=sa_discount_rate)
 
             mg_pv_hybrid_calc = Technology(om_of_td_lines=0.02,
                                            distribution_losses=0.05,
-                                           connection_cost_per_hh=100,
+                                           connection_cost_per_hh=100 * ctm['grid'],
                                            capacity_factor=0.5,
                                            tech_life=20,
                                            discount_rate=mg_discount_rate,
                                            mv_line_type=33,
                                            mv_line_amperage_limit=275,
-                                           mv_line_cost=25000,
+                                           mv_line_cost=25000 * ctm['grid'],
                                            lv_line_type=0.24,
-                                           lv_line_cost=15000,
+                                           lv_line_cost=15000 * ctm['grid'] ,
                                            lv_line_max_length=1,
                                            service_transf_type=75,
-                                           service_transf_cost=9000,
+                                           service_transf_cost=9000 * ctm['grid'],
                                            max_nodes_per_serv_trans=95,
                                            mini_grid=True,
                                            hybrid=True)
 
             mg_wind_hybrid_calc = Technology(om_of_td_lines=0.02,
                                              distribution_losses=0.05,
-                                             connection_cost_per_hh=100,
+                                             connection_cost_per_hh=100 * ctm['grid'],
                                              capacity_factor=0.5,
                                              tech_life=20,
                                              discount_rate=mg_discount_rate,
                                              mv_line_type=33,
                                              mv_line_amperage_limit=275,
-                                             mv_line_cost=25000,
+                                             mv_line_cost=25000 * ctm['grid'],
                                              lv_line_type=0.24,
-                                             lv_line_cost=15000,
+                                             lv_line_cost=15000 * ctm['grid'],
                                              lv_line_max_length=1,
                                              service_transf_type=75,
-                                             service_transf_cost=9000,
+                                             service_transf_cost=9000 * ctm['grid'],
                                              max_nodes_per_serv_trans=95,
                                              mini_grid=True,
                                              hybrid=True,
@@ -337,12 +352,12 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
 
             mg_pv_hybrid_params = {
                 'min_mg_connections': min_mg_size,  # minimum number of households in settlement for mini-grids to be considered as an option
-                'diesel_cost': 500,  # diesel generator capital cost, USD/kW rated power
+                'diesel_cost': 500 * ctm['diesel_capex'],  # diesel generator capital cost, USD/kW rated power
                 'discount_rate': mg_discount_rate,
                 'n_chg': 0.92,  # charge efficiency of battery
                 'n_dis': 0.92,  # discharge efficiency of battery
-                'battery_cost': 300,  # battery capital cost, USD/kWh of storage capacity
-                'pv_cost': 1400,  # PV panel capital cost, USD/kW peak power
+                'battery_cost': 300 * ctm['ren'],  # battery capital cost, USD/kWh of storage capacity
+                'pv_cost': 1400 * ctm['ren'],  # PV panel capital cost, USD/kW peak power
                 'charge_controller': 0,  # PV charge controller cost, USD/kW peak power, set to 0 if already included in pv_cost
                 'pv_inverter': 0,  # PV inverter cost, USD/kW peak power, set to 0 if already included in pv_cost
                 'pv_life': 25,  # PV panel expected lifetime, years
@@ -360,12 +375,12 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
 
             mg_wind_hybrid_params = {
                 'min_mg_connections': min_mg_size,  # minimum number of households in settlement for mini-grids to be considered as an option
-                'diesel_cost': 500,  # diesel generator capital cost, USD/kW rated power
+                'diesel_cost': 500 * ctm['diesel_capex'],  # diesel generator capital cost, USD/kW rated power
                 'discount_rate': mg_discount_rate,
                 'n_chg': 0.92,  # charge efficiency of battery
                 'n_dis': 0.92,  # discharge efficiency of battery
-                'battery_cost': 300,  # battery capital cost, USD/kWh of storage capacity
-                'wind_cost': 1400,  # Wind turbine capital cost, USD/kW peak power
+                'battery_cost': 300 * ctm['ren'],  # battery capital cost, USD/kWh of storage capacity
+                'wind_cost': 1400 * ctm['ren'],  # Wind turbine capital cost, USD/kW peak power
                 'charge_controller': 0,  # PV charge controller cost, USD/kW peak power, set to 0 if already included in pv_cost
                 'wind_life': 25,  # Wind turbine expected lifetime, years
                 'diesel_life': 10,  # diesel generator expected lifetime, years
@@ -385,17 +400,17 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                         capacity_factor=0.5,
                                         tech_life=10,
                                         om_costs=0.1,
-                                        capital_cost={float("inf"): 928},
+                                        capital_cost={float("inf"): 928 * ctm['diesel_capex']},
                                         efficiency=0.28,
                                         discount_rate=grid_discount_rate,
                                         standalone=True)
 
-            sa_diesel_cost = {'diesel_price': diesel_price,
+            sa_diesel_cost = {'diesel_price': diesel_price * ctm['diesel_opex'],
                               'efficiency': 0.28,
                               'diesel_truck_consumption': 14,
                               'diesel_truck_volume': 300}
 
-            mg_diesel_cost = {'diesel_price': diesel_price,
+            mg_diesel_cost = {'diesel_price': diesel_price * ctm['diesel_opex'],
                               'efficiency': 0.33,
                               'diesel_truck_consumption': 33.7,
                               'diesel_truck_volume': 15000}
@@ -410,6 +425,8 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
 
             onsseter.calculate_demand(year, num_people_per_hh_rural, num_people_per_hh_urban, time_step,
                                       urban_tier, rural_tier_large, rural_tier_small, rural_cutoff, tiers)
+
+            onsseter.set_productive_demand(year, productive_demand)
 
             onsseter.calculate_unmet_demand(year, reliability=0.963)
 
@@ -493,6 +510,9 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             onsseter.calculate_emission(grid_factor=grid_emission_factor, year=year,
                                         time_step=time_step, start_year=start_year)
 
+            onsseter.df['RE_Share{}'.format(year)] = float('nan')
+            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share{}'.format(year)] = grid_re_share
+
             onsseter.calc_summaries(df_summary, sumtechs, tech_codes, year, base_year)
 
             # Save to a GeoJSON file
@@ -509,7 +529,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             elif onsseter.df.iloc[:, i].dtype == 'int64':
                 onsseter.df.iloc[:, i] = pd.to_numeric(onsseter.df.iloc[:, i], downcast='signed')
 
-        df_summary.to_csv(summary_csv, index=sumtechs)
+        onsseter.df_summary.to_csv(summary_csv, index=sumtechs)
         onsseter.df.to_csv(settlements_out_csv, index=False)
 
         logging.info('Finished')

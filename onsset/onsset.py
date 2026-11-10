@@ -1095,10 +1095,15 @@ class SettlementProcessor:
         # The model uses 0, 1, 2 as follows; 0 = rural, 1 = peri-urban, 2 = urban.
         # The calibration build into the model only classifies into urban/rural
 
-        self.df.sort_values(by=[SET_POP_CALIB], inplace=True, ascending=False)
+        if 'SMODClass' in self.df.columns:
+            self.df['_k'] = self.df['SMODClass'].fillna(0)
+            self.df.sort_values(by=['_k', SET_POP_CALIB], inplace=True, ascending=False)
+        else:
+            self.df.sort_values(by=[SET_POP_CALIB], inplace=True, ascending=False)
         cumulative_urban_pop = self.df[SET_POP_CALIB].cumsum()
         self.df[SET_URBAN] = np.where(cumulative_urban_pop < (urban_current * self.df[SET_POP_CALIB].sum()), 2, 0)
         self.df.sort_index(inplace=True)
+        self.df.drop(columns=['_k'], errors='ignore', inplace=True)
 
         # Get the calculated urban ratio and compare to the actual ratio
         pop_urb = self.df.loc[self.df[SET_URBAN] > 1, SET_POP_CALIB].sum()
@@ -2096,6 +2101,24 @@ class SettlementProcessor:
         self.df.loc[self.df[SET_URBAN] == 2, SET_TOTAL_ENERGY_PER_CELL] = \
             self.df[SET_HH_DEMAND] * np.round(self.df[SET_POP + "{}".format(year)] / self.df[SET_NUM_PEOPLE_PER_HH]) + produse
 
+    def set_productive_demand(self, year, productive_index):
+        """Productive loads for non-electrified settlements, ported from gep-onsset (estimating_non_residential_loads).
+        Off: all four columns zero. On: Health/Education stay as given in the cluster file;
+        Commercial = Commercial_Multiplier x per-capita demand x pop (settlements > 100 people);
+        Agriculture = 10% of per-capita demand x pop (rural only)."""
+        cols = (SET_HEALTH_DEMAND, SET_EDU_DEMAND, SET_AGRI_DEMAND, SET_COMMERCIAL_DEMAND)
+        if int(productive_index) != 1:
+            for c in cols:
+                self.df[c] = 0.
+            return
+        self.df[[SET_HEALTH_DEMAND, SET_EDU_DEMAND]] = self.df[[SET_HEALTH_DEMAND, SET_EDU_DEMAND]].fillna(0.)
+        per_capita = self.df[SET_HH_DEMAND] / self.df[SET_NUM_PEOPLE_PER_HH]      # kWh/person/yr
+        pop = self.df[SET_POP + "{}".format(year)]
+        self.df[SET_COMMERCIAL_DEMAND] = np.where(self.df[SET_POP_CALIB] > 100,
+                                                  self.df['Commercial_Multiplier'] * per_capita * pop, 0.)
+        self.df[SET_AGRI_DEMAND] = np.where(self.df[SET_URBAN] == 0, 0.1 * per_capita * pop, 0.)
+
+    
     def calculate_demand(self, year, num_people_per_hh_rural, num_people_per_hh_urban,
                          time_step, urban_tier, rural_tier_large, rural_tier_small, rural_cutoff,
                          tiers):
