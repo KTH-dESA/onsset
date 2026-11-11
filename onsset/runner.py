@@ -183,6 +183,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
         grid_emission_factor     = float(sp['GridEmissionFactor' + sfx][grid_index])
         grid_capacity_investment = float(sp['GridCapacityInvestmentCost' + sfx][grid_index])
         grid_re_share            = float(sp['GridRenShare' + sfx][grid_index])
+        grid_re_share_energy = float(sp['GridRenShareEnergy' + sfx][grid_index]) if 'GridRenShareEnergy' + sfx in sp else float('nan')
 
         code = scenario_info.iloc[scenario]['Code'] if 'Code' in scenario_info.columns else '{}_{}_{}'.format(tier_index, grid_index, prio_index)
         settlements_out_csv = os.path.join(results_folder, '{}-1-{}.csv'.format(country_id, code))
@@ -510,8 +511,10 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             onsseter.calculate_emission(grid_factor=grid_emission_factor, year=year,
                                         time_step=time_step, start_year=start_year)
 
-            onsseter.df['RE_Share{}'.format(year)] = float('nan')
-            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share{}'.format(year)] = grid_re_share
+            onsseter.df['RE_Share_Capacity{}'.format(year)] = float('nan')
+            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Capacity{}'.format(year)] = grid_re_share
+            onsseter.df['RE_Share_Energy{}'.format(year)] = float('nan')
+            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Energy{}'.format(year)] = grid_re_share_energy
 
             onsseter.calc_summaries(df_summary, sumtechs, tech_codes, year, base_year)
 
