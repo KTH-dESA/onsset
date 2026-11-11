@@ -41,31 +41,32 @@ def find_least_cost_option_wind(configuration, wind_curve, hour_numbers, load_cu
         fuel_cost = 0
         om_cost = 0
         npc = 0
+        fuel_usage = 0
     else:
         lcoe, investment, battery_investment, fuel_cost, \
-            om_cost, npc = calculate_hybrid_lcoe_wind(diesel_price=diesel_price,
-                                                     end_year=end_year,
-                                                     start_year=start_year,
-                                                     annual_demand=annual_demand,
-                                                     fuel_usage=annual_fuel_consumption,
-                                                     wind_size=wind,
-                                                     wind_cost=wind_cost,
-                                                     charge_controller=charge_controller,
-                                                     wind_om=wind_om,
-                                                     diesel_capacity=diesel,
-                                                     diesel_cost=diesel_cost,
-                                                     diesel_om=diesel_om,
-                                                     battery_inverter_cost=battery_inverter_cost,
-                                                     battery_inverter_life=battery_inverter_life,
-                                                     load_curve=load_curve,
-                                                     diesel_life=diesel_life,
-                                                     wind_life=wind_life,
-                                                     battery_life=battery_life,
-                                                     battery_size=battery,
-                                                     battery_cost=battery_cost,
-                                                     discount_rate=discount_rate)
+            om_cost, npc, fuel_usage = calculate_hybrid_lcoe_wind(diesel_price=diesel_price,
+                                                                  end_year=end_year,
+                                                                  start_year=start_year,
+                                                                  annual_demand=annual_demand,
+                                                                  fuel_usage=annual_fuel_consumption,
+                                                                  wind_size=wind,
+                                                                  wind_cost=wind_cost,
+                                                                  charge_controller=charge_controller,
+                                                                  wind_om=wind_om,
+                                                                  diesel_capacity=diesel,
+                                                                  diesel_cost=diesel_cost,
+                                                                  diesel_om=diesel_om,
+                                                                  battery_inverter_cost=battery_inverter_cost,
+                                                                  battery_inverter_life=battery_inverter_life,
+                                                                  load_curve=load_curve,
+                                                                  diesel_life=diesel_life,
+                                                                  wind_life=wind_life,
+                                                                  battery_life=battery_life,
+                                                                  battery_size=battery,
+                                                                  battery_cost=battery_cost,
+                                                                  discount_rate=discount_rate)
 
-    return lcoe, unmet_demand_share, diesel_generation_share, investment, fuel_cost, om_cost, battery, battery_life, wind, diesel, npc
+    return lcoe, unmet_demand_share, diesel_generation_share, investment, fuel_cost, om_cost, battery, battery_life, wind, diesel, npc, fuel_usage
 
 @numba.njit
 def wind_generation(wind_curve, wind, load, inv_eff):
@@ -302,7 +303,7 @@ def calculate_hybrid_lcoe_wind(diesel_price, end_year, start_year, annual_demand
         if year > 0:
             sum_el_gen += annual_demand / ((1 + discount_rate) ** year)
 
-    return sum_costs / sum_el_gen, investment, total_battery_investment, total_fuel_cost, total_om_cost, npc
+    return sum_costs / sum_el_gen, investment, total_battery_investment, total_fuel_cost, total_om_cost, npc, fuel_usage
 
 
 @numba.njit

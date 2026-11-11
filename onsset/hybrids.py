@@ -44,6 +44,8 @@ def find_least_cost_option(configuration, temp, ghi, hour_numbers, load_curve, b
         fuel_cost = 0
         om_cost = 0
         npc = 0
+        fuel_usage = 0
+        annual_om = 0
     else:
         lcoe, investment, battery_investment, fuel_cost, \
             om_cost, npc, fuel_usage, annual_om = calculate_hybrid_lcoe(diesel_price=diesel_price,
