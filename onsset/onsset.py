@@ -1387,6 +1387,74 @@ class SettlementProcessor:
         return elec_modelled, rural_elec_modelled, urban_elec_modelled, dist_limit, \
             min_night_lights, min_pop, buffer, td_dist_2
 
+    def calibrate_grid_elec_current_rank(self, grid_elec_current, grid_elec_current_urban, grid_elec_current_rural,
+                                         start_year, weights=(2, 1, 1), max_dist=None):
+        """
+        Rank-based calibration of the current grid electrification (alternative to calibrate_grid_elec_current).
+        Within each class (urban / rural) settlements are ranked by a score built from percentile ranks of
+        proximity to the grid (transformer, else MV, else HV distance), night lights and population, weighted by
+        `weights` (dist, ntl, pop; onstove uses 2, 1, 1). Settlements are electrified in rank order until the
+        class's electrified population equals its target; the marginal settlement is partly electrified.
+        Grid only: no mini-grids or off-grid are considered. max_dist (km) optionally makes settlements beyond
+        that grid distance ineligible.
+        """
+        assert self.df.index.is_unique
+        pop = self.df[SET_POP_CALIB]
+        urban = self.df[SET_URBAN] > 1
+        urban_pop, rural_pop, total_pop = pop[urban].sum(), pop[~urban].sum(), pop.sum()
+
+        # same national rescaling of the urban/rural targets as the original method
+        factor = (total_pop * grid_elec_current) / (
+                urban_pop * grid_elec_current_urban + rural_pop * grid_elec_current_rural)
+        ratios = {True: min(1.0, grid_elec_current_urban * factor), False: min(1.0, grid_elec_current_rural * factor)}
+
+        # grid distance, same priority as the original: transformers, else MV lines, else HV lines
+        if min(self.df[SET_DIST_TO_TRANS]) < 9999:
+            dist = self.df[SET_DIST_TO_TRANS]
+        elif min(self.df[SET_MV_DIST_CURRENT]) < 9999:
+            dist = self.df[SET_MV_DIST_CURRENT]
+        else:
+            dist = self.df[SET_HV_DIST_CURRENT]
+        self.df[SET_CALIB_GRID_DIST] = dist
+
+        w_dist, w_ntl, w_pop = weights
+        self.df[SET_ELEC_CURRENT] = 0
+        self.df[SET_ELEC_POP_CALIB] = 0.0
+
+        for is_urban, ratio in ratios.items():
+            mask = (urban if is_urban else ~urban) & (pop > 0)
+            if max_dist is not None:
+                mask &= dist <= max_dist
+            sub = self.df.loc[mask]
+            score = (w_dist * (-sub[SET_CALIB_GRID_DIST]).rank(pct=True)
+                     + w_ntl * sub[SET_NIGHT_LIGHTS].rank(pct=True)
+                     + w_pop * sub[SET_POP_CALIB].rank(pct=True))
+            order = score.sort_values(ascending=False, kind='mergesort').index
+            cum = pop.loc[order].cumsum()
+            target = (urban_pop if is_urban else rural_pop) * ratio
+            full = order[(cum <= target).values]
+            self.df.loc[full, SET_ELEC_CURRENT] = 1
+            self.df.loc[full, SET_ELEC_POP_CALIB] = pop.loc[full]
+            remaining = target - pop.loc[full].sum()
+            if len(full) < len(order) and remaining > 0:
+                marginal = order[len(full)]
+                self.df.loc[marginal, SET_ELEC_CURRENT] = 1
+                self.df.loc[marginal, SET_ELEC_POP_CALIB] = remaining
+
+        ep = self.df[SET_ELEC_POP_CALIB]
+        elec_modelled = ep.sum() / total_pop
+        urban_elec_modelled = ep[urban].sum() / urban_pop
+        rural_elec_modelled = ep[~urban].sum() / rural_pop
+        print('Rank calibration: national {:.2f}, urban {:.2f}, rural {:.2f}'.format(
+            elec_modelled, urban_elec_modelled, rural_elec_modelled))
+
+        self.df[SET_ELEC_FINAL_CODE + "{}".format(start_year)] = np.where(self.df[SET_ELEC_CURRENT] == 1, 1, 99)
+        self.df[SET_ELEC_POP + "{}".format(start_year)] = self.df[SET_ELEC_POP_CALIB]
+
+        # same return layout as calibrate_grid_elec_current
+        return elec_modelled, rural_elec_modelled, urban_elec_modelled, \
+            (max_dist if max_dist is not None else 9999), 0, 0, False, 0
+    
     def mg_elec_current(self,
                         start_year,
                         mg_dist=1, # Distance from existing mini-grids to consider settlements connected to the mini-grid
