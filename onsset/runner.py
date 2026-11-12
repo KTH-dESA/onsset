@@ -108,7 +108,7 @@ def calibration(specs_path, csv_path, specs_path_calib, calibrated_csv_path):
 
 
 def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv_path, wind_path, mv_path,
-             cost_multipliers=None):
+             cost_multipliers=None, only_codes=None):
     """
 
     Arguments
@@ -131,6 +131,8 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
 
     scenario_info = pd.read_excel(specs_path, sheet_name='ScenarioInfo')
     scenarios = scenario_info['Scenario']
+    if only_codes:
+        scenarios = scenario_info.loc[scenario_info['Code'].isin(only_codes), 'Scenario']    
     scenario_parameters = pd.read_excel(specs_path, sheet_name='ScenarioParameters')
     specs_data = pd.read_excel(specs_path, sheet_name='SpecsDataCalib', index_col=0)
     print(specs_data.iloc[0][SPE_COUNTRY])
