@@ -432,11 +432,17 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             onsseter.calculate_unmet_demand(year, reliability=0.963)
 
             onsseter.diesel_cost_columns(sa_diesel_cost, mg_diesel_cost, year)
+            col = SET_MG_DIESEL_FUEL + "{}".format(year)
+            onsseter.df[col] = onsseter.df[col].fillna(onsseter.df[col].mean())
 
             if hybrid_lookup_table:
                 hybrid_lcoe, hybrid_capacity, hybrid_investment, check = \
                     onsseter.pv_hybrids_lcoe_lookuptable(year, time_step, end_year,
                                                          mg_pv_hybrid_params, pv_path=pv_path)
+
+                hybrid_investment.fillna(0, inplace=True)
+                hybrid_capacity.fillna(0, inplace=True)
+                
                 mg_pv_hybrid_calc.hybrid_fuel = hybrid_lcoe
                 mg_pv_hybrid_calc.hybrid_investment = hybrid_investment
                 mg_pv_hybrid_calc.hybrid_capacity = hybrid_capacity
@@ -448,8 +454,8 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                 wind_hybrid_capacity.fillna(0, inplace=True)
 
                 mg_wind_hybrid_calc.hybrid_fuel = wind_hybrid_lcoe
-                mg_wind_hybrid_calc.hybrid_investment = wind_hybrid_capacity
-                mg_wind_hybrid_calc.hybrid_capacity = wind_hybrid_investment
+                mg_wind_hybrid_calc.hybrid_investment = wind_hybrid_investment
+                mg_wind_hybrid_calc.hybrid_capacity = wind_hybrid_capacity
             else:
                 hybrid_lcoe, hybrid_capacity, hybrid_investment = \
                     onsseter.pv_hybrids_lcoe(year, time_step, end_year,
@@ -472,7 +478,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             onsseter.max_extension_dist(year, time_step, end_year, start_year, grid_calc, sa_diesel_calc,
                                         grid_reliability_option, max_auto_intensification_cost, auto_intensification)
 
-            onsseter.pre_selection(eleclimit, year, time_step, 2, auto_intensification)
+            onsseter.pre_selection(eleclimit, year, time_step, auto_intensification, prioritization)
 
             onsseter.df[SET_LCOE_GRID + "{}".format(year)], onsseter.df[SET_MIN_GRID_DIST + "{}".format(year)], \
                 grid_investment, grid_capacity, x_coordinates, y_coordinates, new_lines_geojson[year] = \
@@ -481,17 +487,16 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                               grid_reliability_option,
                                               max_grid_extension_dist,
                                               year,
-                                              start_year,
                                               end_year,
                                               time_step,
                                               grid_cap_gen_limit,
                                               grid_connect_limit,
                                               x_coordinates,
                                               y_coordinates,
-                                              mg_interconnection=False,
+                                              mg_interconnection=mg_interconnection,
                                               )
 
-            onsseter.results_columns(techs, tech_codes, year, time_step, prioritization, auto_intensification,
+            onsseter.results_columns(techs, tech_codes, year, time_step, auto_intensification,
                                      mg_interconnection)
 
             onsseter.calculate_investments_and_capacity(sa_pv_investment, sa_pv_capacity,
@@ -504,9 +509,9 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             else:
                 final_step = False
 
-            onsseter.check_grid_limitations(new_grid_connect_limit, annual_grid_cap_gen_limit, year, time_step, final_step)
+            onsseter.check_grid_limitations(new_grid_connect_limit, annual_grid_cap_gen_limit * time_step, year, time_step, final_step)
 
-            onsseter.apply_limitations(eleclimit, year, time_step, 2, auto_intensification)
+            onsseter.apply_limitations(eleclimit, year, time_step, auto_intensification)
 
             onsseter.calculate_emission(grid_factor=grid_emission_factor, year=year,
                                         time_step=time_step, start_year=start_year)
@@ -532,7 +537,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             elif onsseter.df.iloc[:, i].dtype == 'int64':
                 onsseter.df.iloc[:, i] = pd.to_numeric(onsseter.df.iloc[:, i], downcast='signed')
 
-        onsseter.df_summary.to_csv(summary_csv, index=sumtechs)
+        df_summary.to_csv(summary_csv, index=True)
         onsseter.df.to_csv(settlements_out_csv, index=False)
 
         logging.info('Finished')
