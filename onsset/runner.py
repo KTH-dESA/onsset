@@ -246,6 +246,10 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
             else:
                 time_steps[yearsofanalysis[i]] = yearsofanalysis[i] - yearsofanalysis[i - 1]
 
+        def _yr(name, fallback):
+            c = '{}{}{}'.format(name, year, sfx)
+            return float(sp[c][grid_index]) if c in sp else fallback
+        
         for year in yearsofanalysis:
 
             time_step = time_steps[year]
@@ -261,15 +265,19 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                           hv_mv_substation_type=10000, # kVA
                                           )
 
+            grid_price_y = _yr('GridGenerationCost', grid_price)
+            grid_capacity_investment_y = _yr('GridCapacityInvestmentCost', grid_capacity_investment)
+
+            
             grid_calc = Technology(om_of_td_lines=0.02,
                                    distribution_losses=float(specs_data.iloc[0][SPE_GRID_LOSSES]),
                                    connection_cost_per_hh=125 * ctm['grid'],
                                    base_to_peak_load_ratio=0.8,
                                    capacity_factor=1,
                                    tech_life=30,
-                                   grid_capacity_investment=grid_capacity_investment,
+                                   grid_capacity_investment=grid_capacity_investment_y,
                                    grid_penalty_ratio=1,
-                                   grid_price=grid_price,
+                                   grid_price=grid_price_y,
                                    discount_rate=grid_discount_rate,
                                    mv_line_type=33,
                                    mv_line_amperage_limit=275,
@@ -371,7 +379,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                 'dod_max': 0.8,  # maximum depth of discharge of battery
                 'inv_eff': 0.93,  # inverter_efficiency
                 'lpsp_max': 0.02,  # maximum loss of load allowed over the year, in share of kWh
-                'diesel_limit': 0.5,  # Max annual share of mini-grid generation from diesel gen-set
+                'diesel_limit': 0.15,  # Max annual share of mini-grid generation from diesel gen-set
                 'full_life_cycles': 4000  # Equivalent full life-cycles of battery until replacement
             }
 
@@ -393,7 +401,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                 'dod_max': 0.8,  # maximum depth of discharge of battery
                 'inv_eff': 0.93,  # inverter_efficiency
                 'lpsp_max': 0.02,  # maximum loss of load allowed over the year, in share of kWh
-                'diesel_limit': 0.7,  # Max annual share of mini-grid generation from diesel gen-set
+                'diesel_limit': 0.20,  # Max annual share of mini-grid generation from diesel gen-set
                 'full_life_cycles': 4000  # Equivalent full life-cycles of battery until replacement
             }
 
@@ -407,12 +415,16 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                         discount_rate=grid_discount_rate,
                                         standalone=True)
 
-            sa_diesel_cost = {'diesel_price': diesel_price * ctm['diesel_opex'],
+            ct_col = 'CarbonTax{}'.format(year)
+            carbon_cost_y = float(sp[ct_col][grid_index]) if ct_col in sp else carbon_cost
+            diesel_price_y = float(scenario_parameters.iloc[0]['DieselPrice'] + (carbon_cost_y / 1000000) * 256.9131097 * 9.9445485)
+          
+            sa_diesel_cost = {'diesel_price': diesel_price_y * ctm['diesel_opex'],
                               'efficiency': 0.28,
                               'diesel_truck_consumption': 14,
                               'diesel_truck_volume': 300}
 
-            mg_diesel_cost = {'diesel_price': diesel_price * ctm['diesel_opex'],
+            mg_diesel_cost = {'diesel_price': diesel_price_y * ctm['diesel_opex'],
                               'efficiency': 0.33,
                               'diesel_truck_consumption': 33.7,
                               'diesel_truck_volume': 15000}
@@ -472,7 +484,7 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
                                                                                        techs, tech_codes, min_mg_size, 0)
 
             grid_investment, grid_capacity, grid_cap_gen_limit, grid_connect_limit = \
-                onsseter.pre_electrification(grid_price, year, time_step, end_year, grid_calc, sa_diesel_calc,
+                onsseter.pre_electrification(grid_price_y, year, time_step, end_year, grid_calc, sa_diesel_calc,
                                              grid_reliability_option, grid_cap_gen_limit,
                                              new_grid_connect_limit)
 
@@ -514,13 +526,17 @@ def scenario(specs_path, calibrated_csv_path, results_folder, summary_folder, pv
 
             onsseter.apply_limitations(eleclimit, year, time_step, auto_intensification)
 
-            onsseter.calculate_emission(grid_factor=grid_emission_factor, year=year,
+            grid_emission_factor_y = _yr('GridEmissionFactor', grid_emission_factor)
+            grid_re_share_y = _yr('GridRenShare', grid_re_share)
+            grid_re_share_energy_y = _yr('GridRenShareEnergy', grid_re_share_energy)
+            
+            onsseter.calculate_emission(grid_factor=grid_emission_factor_y, year=year,
                                         time_step=time_step, start_year=start_year)
 
             onsseter.df['RE_Share_Capacity{}'.format(year)] = float('nan')
-            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Capacity{}'.format(year)] = grid_re_share
+            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Capacity{}'.format(year)] = grid_re_share_y
             onsseter.df['RE_Share_Energy{}'.format(year)] = float('nan')
-            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Energy{}'.format(year)] = grid_re_share_energy
+            onsseter.df.loc[onsseter.df['FinalElecCode{}'.format(year)] < 3, 'RE_Share_Energy{}'.format(year)] = grid_re_share_energy_y
 
             onsseter.calc_summaries(df_summary, sumtechs, tech_codes, year, base_year)
 
