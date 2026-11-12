@@ -10,6 +10,7 @@ import geojson
 import pandas as pd
 from onsset import (SET_ELEC_ORDER, SET_LCOE_GRID, SET_MIN_GRID_DIST, SET_GRID_PENALTY,
                     SET_MV_CONNECT_DIST, SET_WINDVEL, SET_WINDCF, SET_X_DEG, SET_Y_DEG,
+                    SET_MG_DIESEL_FUEL,
                     SettlementProcessor, Technology)
 
 try:
